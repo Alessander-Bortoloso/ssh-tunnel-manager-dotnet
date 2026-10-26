@@ -1,0 +1,60 @@
+name: Build and Publish Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Locate project
+        id: project
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:GITHUB_WORKSPACE\SshTunnelManager.csproj") {
+            "project_path=$env:GITHUB_WORKSPACE\SshTunnelManager.csproj" >> $env:GITHUB_OUTPUT
+          } elseif (Test-Path "$env:GITHUB_WORKSPACE\SshTunnelManager\SshTunnelManager.csproj") {
+            "project_path=$env:GITHUB_WORKSPACE\SshTunnelManager\SshTunnelManager.csproj" >> $env:GITHUB_OUTPUT
+          } else {
+            throw 'SshTunnelManager.csproj was not found in the repository root or SshTunnelManager folder.'
+          }
+
+      - name: Build and publish self-contained single-file EXE
+        shell: pwsh
+        run: |
+          $project = "${{ steps.project.outputs.project_path }}"
+          $output = Join-Path $env:GITHUB_WORKSPACE 'publish\win-x64'
+          dotnet publish $project `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path (Join-Path $output 'SshTunnelManager.exe'))) {
+            throw 'Expected SshTunnelManager.exe was not generated.'
+          }
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SshTunnelManager-windows-x64
+          path: publish/win-x64/SshTunnelManager.exe
+          if-no-files-found: error
+          retention-days: 30
